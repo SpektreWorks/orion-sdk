@@ -27,12 +27,9 @@
 
 double distance(double lat0d, double lon0d, double lat1d, double lon1d);
 static void KillProcess(const char *pMessage, int Value);
-static void ProcessArgs(int argc, char **argv, int *pLevel);
+static void ProcessArgs(int argc, char **argv);
 
 static OrionPkt_t PktIn;
-
-// Elevation tile level of detail - defaults to 12
-static int TileLevel = 12;
 
 int main(int argc, char **argv)
 {
@@ -50,9 +47,11 @@ int main(int argc, char **argv)
     int thistime;
     int lasttime = 0;
 
+    FILE *flog;
+    flog = fopen("/root/flytocamera.log","w");
 
     // Process the command line arguments
-    ProcessArgs(argc, argv, &TileLevel);
+    ProcessArgs(argc, argv);
 
     sockfd = socket(AF_INET,SOCK_DGRAM,0);
     memset(&servaddr,0,sizeof(servaddr));
@@ -77,10 +76,10 @@ int main(int argc, char **argv)
                 if ((Geo.slantRange > 0) && (thistime > (lasttime + 10000)))
                 {
                     lasttime = thistime;
-                    printf("TARGET LLA: %10.6lf %11.6lf %6.1lf\r\n",
-                           degrees(Geo.imagePosLLA[LAT]),
-                           degrees(Geo.imagePosLLA[LON]),
-                           Geo.imagePosLLA[ALT] - Geo.base.geoidUndulation);
+                    fprintf(flog,"TARGET LLA: %10.6lf %11.6lf %6.1lf\r\n",
+                            degrees(Geo.imagePosLLA[LAT]),
+                            degrees(Geo.imagePosLLA[LON]),
+                            Geo.imagePosLLA[ALT] - Geo.base.geoidUndulation);
 
                     latf = degrees(Geo.imagePosLLA[LAT]);
                     lonf = degrees(Geo.imagePosLLA[LON]);
@@ -89,7 +88,7 @@ int main(int argc, char **argv)
                     if ( ((d > MIN_DISTANCE_IGNORE_MILES) && (d < MAX_DISTANCE_IGNORE_MILES)) ||
                          (prev_latf == 0.0) )
                     {
-                        printf("distance: %f\n",d);
+                        fprintf(flog,"distance: %f\n",d);
                         sprintf(lat,"%.4lf",latf);
                         sprintf(lon,"%.4lf",lonf);
 
@@ -119,7 +118,7 @@ int main(int argc, char **argv)
                         buff[i++] = cksum[1];
                         buff[i] = 0;
 
-                        printf("buff: %s\n",buff);
+                        fprintf(flog,"buff: %s\n",buff);
 
                         sendto(sockfd,buff,i,0,(struct sockaddr*)&servaddr,sizeof(servaddr));
 
@@ -129,6 +128,9 @@ int main(int argc, char **argv)
                 }
 
             }
+        //According to Trillium, the state data is update by the gimbal at 30Hz. So sleep 
+        //for 10ms in between each call to give the CPU a break
+        usleep(10000);
         }
 
         // Sleep for 20 ms so as not to hog the entire CPU
@@ -173,7 +175,7 @@ static void KillProcess(const char *pMessage, int Value)
 
 }// KillProcess
 
-static void ProcessArgs(int argc, char **argv, int *pLevel)
+static void ProcessArgs(int argc, char **argv)
 {
     char Error[80];
 
@@ -184,7 +186,6 @@ static void ProcessArgs(int argc, char **argv, int *pLevel)
     // Use a switch with fall-through to overwrite the default geopoint
     switch (argc)
     {
-    case 2: *pLevel = atoi(argv[1]);         // Tile level of detail
     case 1: break;                           // Serial port path
     // If there aren't enough arguments
     default:
