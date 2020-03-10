@@ -3,6 +3,11 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 
 #include "LineOfSight.h"
 #include "GeolocateTelemetry.h"
@@ -17,6 +22,10 @@
 # define DEBUG_PRINT(...)
 #endif
 
+#define MAX_DISTANCE_IGNORE_MILES 20.0
+#define MIN_DISTANCE_IGNORE_MILES 0.0001894 //0.1894 //1000 feet
+
+double distance(double lat0d, double lon0d, double lat1d, double lon1d);
 static void KillProcess(const char *pMessage, int Value);
 static void ProcessArgs(int argc, char **argv, int *pLevel);
 
@@ -27,8 +36,27 @@ static int TileLevel = 12;
 
 int main(int argc, char **argv)
 {
+    int i,j;
+    unsigned char sum = 0;
+    char cksum[2];
+    int sockfd;
+    struct sockaddr_in servaddr;
+    char buff[100];
+    char lat[7];
+    char lon[8];
+    double latf,prev_latf = 0.0;
+    double lonf,prev_lonf = 0.0;
+    double d;
+
+
     // Process the command line arguments
     ProcessArgs(argc, argv, &TileLevel);
+
+    sockfd = socket(AF_INET,SOCK_DGRAM,0);
+    memset(&servaddr,0,sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(15000);
+    servaddr.sin_addr.s_addr = inet_addr("192.168.2.89");
 
     // Loop forever
     while (1)
@@ -41,18 +69,58 @@ int main(int argc, char **argv)
             // If this packet is a geolocate telemetry packet
             if (DecodeGeolocateTelemetry(&PktIn, &Geo))
             {
-                //double TargetLla[NLLA]
-                double Range;
-
                 // If we got a valid target position from the gimbal
                 if (Geo.slantRange > 0)
                 {
-                    Range = Geo.slantRange;
-                    printf("TARGET LLA: %10.6lf %11.6lf %6.1lf, RANGE: %6.0lf\r",
+                    printf("TARGET LLA: %10.6lf %11.6lf %6.1lf\r\n",
                            degrees(Geo.imagePosLLA[LAT]),
                            degrees(Geo.imagePosLLA[LON]),
-                           Geo.imagePosLLA[ALT] - Geo.base.geoidUndulation,
-                           Range);
+                           Geo.imagePosLLA[ALT] - Geo.base.geoidUndulation);
+
+                    latf = degrees(Geo.imagePosLLA[LAT]);
+                    lonf = degrees(Geo.imagePosLLA[LON]);
+
+                    d = distance(prev_latf,prev_lonf,latf,lonf);
+                    if ( ((d > MIN_DISTANCE_IGNORE_MILES) && (d < MAX_DISTANCE_IGNORE_MILES)) ||
+                         (prev_latf == 0.0) )
+                    {
+                        printf("distance: %f\n",d);
+                        sprintf(lat,"%.4lf",latf);
+                        sprintf(lon,"%.4lf",lonf);
+
+                        i = 0;
+                        buff[i++] = '$';
+                        buff[i++] = 'S';
+                        buff[i++] = 'W';
+                        buff[i++] = ',';
+                        for(j=0;j<strlen(lat);j++)
+                        {
+                            buff[i++] = lat[j];
+                        }
+                        buff[i++] = ',';
+                        for(j=0;j<strlen(lon);j++)
+                        {
+                            buff[i++] = lon[j];
+                        }
+                        buff[i++] = ',';
+
+                        sum = 0;
+                        for(j=0;j<i;j++)
+                        {
+                            sum += buff[j];
+                        }
+                        sprintf(cksum,"%x",sum);
+                        buff[i++] = cksum[0];
+                        buff[i++] = cksum[1];
+
+                        printf("buff: %s\n",buff);
+
+                        sendto(sockfd,buff,i,0,(struct sockaddr*)&servaddr,sizeof(servaddr));
+
+                        prev_latf = latf;
+                        prev_lonf = lonf;
+                    }
+                    usleep(10000000);
                 }
 
             }
@@ -65,6 +133,24 @@ int main(int argc, char **argv)
 
     // Finally, be done!
     return 0;
+}
+
+double distance(double lat0d, double lon0d, double lat1d, double lon1d)
+{
+    //Given a pair lats and lons in degrees, outputs the distance between them in miles
+    double lat0 = lat0d * 3.14159/180.0; //degrees to radians
+    double lon0 = lon0d * 3.14159/180.0;
+    double lat1 = lat1d * 3.14159/180.0;
+    double lon1 = lon1d * 3.14159/180.0;
+
+    double term1, term2, term3, term4;
+
+    term1 = sin((lat0-lat1)/2) * sin((lat0-lat1)/2);
+    term2 = cos(lat0) * cos(lat1) * sin((lon0-lon1)/2) * sin((lon0-lon1)/2);
+    term3 = asin(sqrt(term1 + term2));
+    term4 = 2 * 6378.137 * term3; //distance in km
+
+    return term4 * 0.62137; //convert km to miles
 }
 
 // This function just shuts things down consistently with a nice message for the user
