@@ -42,8 +42,8 @@ int main(int argc, char **argv)
     int sockfd;
     struct sockaddr_in servaddr;
     char buff[100];
-    char lat[7];
-    char lon[8];
+    char lat[10];
+    char lon[10];
     double latf,prev_latf = 0.0;
     double lonf,prev_lonf = 0.0;
     double d;
@@ -56,7 +56,7 @@ int main(int argc, char **argv)
     memset(&servaddr,0,sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_port = htons(15000);
-    servaddr.sin_addr.s_addr = inet_addr("192.168.2.89");
+    servaddr.sin_addr.s_addr = inet_addr("192.168.2.85");
 
     // Loop forever
     while (1)
@@ -112,6 +112,7 @@ int main(int argc, char **argv)
                         sprintf(cksum,"%x",sum);
                         buff[i++] = cksum[0];
                         buff[i++] = cksum[1];
+                        buff[i] = 0;
 
                         printf("buff: %s\n",buff);
 
