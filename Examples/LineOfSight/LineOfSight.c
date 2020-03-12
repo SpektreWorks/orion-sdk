@@ -23,7 +23,7 @@
 #endif
 
 #define MAX_DISTANCE_IGNORE_MILES 20.0
-#define MIN_DISTANCE_IGNORE_MILES 0.0001894 //0.1894 //1000 feet
+#define MIN_DISTANCE_IGNORE_MILES 0.1894 //1000 feet
 
 double distance(double lat0d, double lon0d, double lat1d, double lon1d);
 static void KillProcess(const char *pMessage, int Value);
@@ -47,6 +47,8 @@ int main(int argc, char **argv)
     double latf,prev_latf = 0.0;
     double lonf,prev_lonf = 0.0;
     double d;
+    int thistime;
+    int lasttime = 0;
 
 
     // Process the command line arguments
@@ -56,7 +58,7 @@ int main(int argc, char **argv)
     memset(&servaddr,0,sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_port = htons(15000);
-    servaddr.sin_addr.s_addr = inet_addr("192.168.2.85");
+    servaddr.sin_addr.s_addr = inet_addr("192.168.2.83");
 
     // Loop forever
     while (1)
@@ -69,9 +71,12 @@ int main(int argc, char **argv)
             // If this packet is a geolocate telemetry packet
             if (DecodeGeolocateTelemetry(&PktIn, &Geo))
             {
+                thistime = Geo.base.systemTime;
+                //printf("time: %d\n",thistime);
                 // If we got a valid target position from the gimbal
-                if (Geo.slantRange > 0)
+                if ((Geo.slantRange > 0) && (thistime > (lasttime + 10000)))
                 {
+                    lasttime = thistime;
                     printf("TARGET LLA: %10.6lf %11.6lf %6.1lf\r\n",
                            degrees(Geo.imagePosLLA[LAT]),
                            degrees(Geo.imagePosLLA[LON]),
@@ -121,7 +126,6 @@ int main(int argc, char **argv)
                         prev_latf = latf;
                         prev_lonf = lonf;
                     }
-                    usleep(10000000);
                 }
 
             }
