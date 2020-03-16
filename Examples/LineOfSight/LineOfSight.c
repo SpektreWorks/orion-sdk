@@ -30,6 +30,7 @@ static void KillProcess(const char *pMessage, int Value);
 static void ProcessArgs(int argc, char **argv);
 
 static OrionPkt_t PktIn;
+FILE *flog;
 
 int main(int argc, char **argv)
 {
@@ -47,7 +48,6 @@ int main(int argc, char **argv)
     int thistime;
     int lasttime = 0;
 
-    FILE *flog;
     flog = fopen("/root/flytocamera.log","w");
 
     // Process the command line arguments
@@ -71,12 +71,16 @@ int main(int argc, char **argv)
             if (DecodeGeolocateTelemetry(&PktIn, &Geo))
             {
                 thistime = Geo.base.systemTime;
-                //printf("time: %d\n",thistime);
                 // If we got a valid target position from the gimbal
                 if ((Geo.slantRange > 0) && (thistime > (lasttime + 10000)))
                 {
                     lasttime = thistime;
                     fprintf(flog,"TARGET LLA: %10.6lf %11.6lf %6.1lf\r\n",
+                            degrees(Geo.imagePosLLA[LAT]),
+                            degrees(Geo.imagePosLLA[LON]),
+                            Geo.imagePosLLA[ALT] - Geo.base.geoidUndulation);
+                    fflush(flog);
+                    printf("TARGET LLA: %10.6lf %11.6lf %6.1lf\r\n",
                             degrees(Geo.imagePosLLA[LAT]),
                             degrees(Geo.imagePosLLA[LON]),
                             Geo.imagePosLLA[ALT] - Geo.base.geoidUndulation);
@@ -89,6 +93,7 @@ int main(int argc, char **argv)
                          (prev_latf == 0.0) )
                     {
                         fprintf(flog,"distance: %f\n",d);
+                        fflush(flog);
                         sprintf(lat,"%.4lf",latf);
                         sprintf(lon,"%.4lf",lonf);
 
@@ -119,6 +124,7 @@ int main(int argc, char **argv)
                         buff[i] = 0;
 
                         fprintf(flog,"buff: %s\n",buff);
+                        fflush(flog);
 
                         sendto(sockfd,buff,i,0,(struct sockaddr*)&servaddr,sizeof(servaddr));
 
@@ -179,14 +185,19 @@ static void ProcessArgs(int argc, char **argv)
 {
     char Error[80];
 
-    // If we can't connect to a gimbal, kill the app right now
-    if (OrionCommOpen(&argc, &argv) == FALSE)
-        KillProcess("", 1);
+    // If we can't connect to a gimbal, sleep and try again until we do
+    while (OrionCommOpen(&argc, &argv) == FALSE)
+    {
+        fprintf(flog,"No Camera detected.\n");
+        fflush(flog);
+        printf("No Camera detected.\n");
+        sleep(5);
+    }
 
     // Use a switch with fall-through to overwrite the default geopoint
     switch (argc)
     {
-    case 1: break;                           // Serial port path
+    case 2: break;
     // If there aren't enough arguments
     default:
         // Kill the application and print the usage info
