@@ -45,8 +45,9 @@ int main(int argc, char **argv)
     double latf,prev_latf = 0.0;
     double lonf,prev_lonf = 0.0;
     double d;
-    int thistime;
-    int lasttime = 0;
+    int thistime = 0;
+    int tic1 = 0;
+    int tic10 = 0;
 
     flog = fopen("/root/flytocamera.log","w");
 
@@ -59,89 +60,88 @@ int main(int argc, char **argv)
     servaddr.sin_port = htons(15000);
     servaddr.sin_addr.s_addr = inet_addr("192.168.2.83");
 
+    //Clear buff
+    memset(buff,0,100);
+
     // Loop forever
     while (1)
     {
         GeolocateTelemetry_t Geo;
-
-        // Pull all queued up packets off the comm interface
-        while (OrionCommReceive(&PktIn))
+        while (OrionCommReceive(&PktIn)) // Pull all queued up packets off the comm interface
         {
-            // If this packet is a geolocate telemetry packet
-            if (DecodeGeolocateTelemetry(&PktIn, &Geo))
+            if (DecodeGeolocateTelemetry(&PktIn, &Geo)) // If this packet is a geolocate telemetry packet
             {
                 thistime = Geo.base.systemTime;
-                // If we got a valid target position from the gimbal
-                if ((Geo.slantRange > 0) && (thistime > (lasttime + 10000)))
+                if (thistime > (tic10 + 10000)) //Update geolocation to GCS every 10 seconds
                 {
-                    lasttime = thistime;
-                    fprintf(flog,"TARGET LLA: %10.6lf %11.6lf %6.1lf\r\n",
-                            degrees(Geo.imagePosLLA[LAT]),
-                            degrees(Geo.imagePosLLA[LON]),
-                            Geo.imagePosLLA[ALT] - Geo.base.geoidUndulation);
-                    fflush(flog);
-                    printf("TARGET LLA: %10.6lf %11.6lf %6.1lf\r\n",
-                            degrees(Geo.imagePosLLA[LAT]),
-                            degrees(Geo.imagePosLLA[LON]),
-                            Geo.imagePosLLA[ALT] - Geo.base.geoidUndulation);
-
-                    latf = degrees(Geo.imagePosLLA[LAT]);
-                    lonf = degrees(Geo.imagePosLLA[LON]);
-
-                    d = distance(prev_latf,prev_lonf,latf,lonf);
-                    if ( ((d > MIN_DISTANCE_IGNORE_MILES) && (d < MAX_DISTANCE_IGNORE_MILES)) ||
-                         (prev_latf == 0.0) )
+                    if (Geo.slantRange > 0) //Slant range greater than 0 indicates a valid geolocation
                     {
-                        fprintf(flog,"distance: %f\n",d);
-                        fflush(flog);
-                        sprintf(lat,"%.4lf",latf);
-                        sprintf(lon,"%.4lf",lonf);
+                        tic10 = thistime;
+                        fprintf(flog,"TARGET LLA: %10.6lf %11.6lf %6.1lf\r\n",
+                                degrees(Geo.imagePosLLA[LAT]),
+                                degrees(Geo.imagePosLLA[LON]),
+                                Geo.imagePosLLA[ALT] - Geo.base.geoidUndulation);
 
-                        i = 0;
-                        buff[i++] = '$';
-                        buff[i++] = 'S';
-                        buff[i++] = 'W';
-                        buff[i++] = ',';
-                        for(j=0;j<strlen(lat);j++)
+                        latf = degrees(Geo.imagePosLLA[LAT]);
+                        lonf = degrees(Geo.imagePosLLA[LON]);
+
+                        //Great circle distance
+                        d = distance(prev_latf,prev_lonf,latf,lonf);
+                        if ( ((d > MIN_DISTANCE_IGNORE_MILES) && (d < MAX_DISTANCE_IGNORE_MILES)) ||
+                             (prev_latf == 0.0) )
                         {
-                            buff[i++] = lat[j];
+                            fprintf(flog,"distance: %f\n",d);
+                            sprintf(lat,"%.4lf",latf);
+                            sprintf(lon,"%.4lf",lonf);
+
+                            i = 0;
+                            buff[i++] = '$';
+                            buff[i++] = 'S';
+                            buff[i++] = 'W';
+                            buff[i++] = ',';
+                            for(j=0;j<strlen(lat);j++)
+                            {
+                                buff[i++] = lat[j];
+                            }
+                            buff[i++] = ',';
+                            for(j=0;j<strlen(lon);j++)
+                            {
+                                buff[i++] = lon[j];
+                            }
+                            buff[i++] = ',';
+
+                            sum = 0;
+                            for(j=0;j<i;j++)
+                            {
+                                sum += buff[j];
+                            }
+                            sprintf(cksum,"%x",sum);
+                            buff[i++] = cksum[0];
+                            buff[i++] = cksum[1];
+                            buff[i] = 0;
+
+                            prev_latf = latf;
+                            prev_lonf = lonf;
                         }
-                        buff[i++] = ',';
-                        for(j=0;j<strlen(lon);j++)
-                        {
-                            buff[i++] = lon[j];
-                        }
-                        buff[i++] = ',';
-
-                        sum = 0;
-                        for(j=0;j<i;j++)
-                        {
-                            sum += buff[j];
-                        }
-                        sprintf(cksum,"%x",sum);
-                        buff[i++] = cksum[0];
-                        buff[i++] = cksum[1];
-                        buff[i] = 0;
-
-                        fprintf(flog,"buff: %s\n",buff);
-                        fflush(flog);
-
-                        sendto(sockfd,buff,i,0,(struct sockaddr*)&servaddr,sizeof(servaddr));
-
-                        prev_latf = latf;
-                        prev_lonf = lonf;
                     }
-                }
 
+                }
             }
-        //According to Trillium, the state data is update by the gimbal at 30Hz. So sleep 
-        //for 10ms in between each call to give the CPU a break
-        usleep(10000);
+            //According to Trillium, the state data is update by the gimbal at 30Hz. So sleep 
+            //for 10ms in between each call to give the CPU a break
+            fflush(flog);
+            usleep(10000);
         }
 
-        // Sleep for 20 ms so as not to hog the entire CPU
-        fflush(stdout);
-        usleep(20000);
+        if ( thistime > (tic1+1000) && (strlen(buff) > 0) )
+        {
+            //Send the contents of buff every second unless buff is empty
+            tic1 = thistime;
+            fprintf(flog,"buff: %s\n",buff);
+            sendto(sockfd,buff,strlen(buff),0,(struct sockaddr*)&servaddr,sizeof(servaddr));
+        }
+        fflush(flog);
+        usleep(10000);
     }
 
     // Finally, be done!
