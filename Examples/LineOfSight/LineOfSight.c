@@ -49,7 +49,33 @@ int main(int argc, char **argv)
     int tic1 = 0;
     int tic10 = 0;
 
-    flog = fopen("/root/flytocamera.log","w");
+    //Super hacky way to do rotating logs
+    if ( access("/root/logs/flytocamera.log.5",F_OK) != -1 )
+    {
+        system("rm -rf /root/logs/flytocamera.log.5");
+    }
+    if ( access("/root/logs/flytocamera.log.4",F_OK) != -1 )
+    {
+        system("mv /root/logs/flytocamera.log.4 /root/logs/flytocamera.log.5");
+    }
+    if ( access("/root/logs/flytocamera.log.3",F_OK) != -1 )
+    {
+        system("mv /root/logs/flytocamera.log.3 /root/logs/flytocamera.log.4");
+    }
+    if ( access("/root/logs/flytocamera.log.2",F_OK) != -1 )
+    {
+        system("mv /root/logs/flytocamera.log.2 /root/logs/flytocamera.log.3");
+    }
+    if ( access("/root/logs/flytocamera.log.1",F_OK) != -1 )
+    {
+        system("mv /root/logs/flytocamera.log.1 /root/logs/flytocamera.log.2");
+    }
+    if ( access("/root/logs/flytocamera.log",F_OK) != -1 )
+    {
+        system("mv /root/logs/flytocamera.log /root/logs/flytocamera.log.1");
+    }
+
+    flog = fopen("/root/logs/flytocamera.log","w");
 
     // Process the command line arguments
     ProcessArgs(argc, argv);
